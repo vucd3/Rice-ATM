@@ -15,6 +15,9 @@ import face_recognition
 import pickle
 import numpy as np
 import RPi.GPIO as gpio
+import torch
+import torch.nn as nn
+from MobileNetLite import *
 
 class DetectFace(object):
     def setupUi(self, MainWindow):
@@ -142,11 +145,12 @@ class DetectFace(object):
         self.timer_1.start(1000)
         self.timer_1.timeout.connect(self.displayTime)
         
-        self.lower_HSV_values = np.array([0, 40, 0], dtype = "uint8")
-        self.upper_HSV_values = np.array([25, 255, 255], dtype = "uint8")
+        mobile_model = MobileLiteNet54()
+        checkpoint = torch.load('MobileLiteNet54/_40_best.pth.tar', map_location='cpu')
+        
+        self.model = nn.DataParallel(mobile_model)
+        self.model.load_state_dict(checkpoint['state_dict'])
 
-        self.lower_YCbCr_values = np.array((0, 138, 67), dtype = "uint8")
-        self.upper_YCbCr_values = np.array((255, 173, 133), dtype = "uint8")
 
         self.DT =21
         self.SCK=20
@@ -205,41 +209,18 @@ class DetectFace(object):
         + time.toString() + "\t" + weight + " kg" + "\n")
 
     def antispoofing(self):
-        predict = ""
+        labels = ["real_face", "fake_face"]
 
-        for (x, y, w, h) in self.faces:
-            roi = self.resize_c[y:y+h, x:x+w]
+        roi_faces = cv2.resize(self.roi_color , (224, 224))
+        roi_faces = np.reshape(roi_faces , (1, 3, 224, 224))
+        roi_faces = torch.tensor(roi_faces)
+        roi_faces = roi_faces.float()
 
-        HSV_image = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        YCbCr_image = cv2.cvtColor(roi, cv2.COLOR_BGR2YCR_CB)
-        
-        binary_mask_image = HSV_image
+        out = self.model(roi_faces)
+        _, predict = torch.max(out, 1)
+        predict = predict.numpy()
 
-        mask_YCbCr = cv2.inRange(YCbCr_image, self.lower_YCbCr_values, self.upper_YCbCr_values)
-        mask_HSV = cv2.inRange(HSV_image, self.lower_HSV_values, self.upper_HSV_values) 
-
-        binary_mask_image = cv2.add(mask_HSV,mask_YCbCr)
-
-        image_foreground = cv2.erode(binary_mask_image,None,iterations = 3)     	#remove noise
-        dilated_binary_image = cv2.dilate(binary_mask_image,None,iterations = 3)   #The background region is reduced a little because of the dilate operation
-        ret,image_background = cv2.threshold(dilated_binary_image,1,128,cv2.THRESH_BINARY)  #set all background regions to 128
-
-        image_marker = cv2.add(image_foreground,image_background)   #add both foreground and backgroud, forming markers. The markers are "seeds" of the future image regions.
-        image_marker32 = np.int32(image_marker) #convert to 32SC1 format
-
-        cv2.watershed(roi,image_marker32)
-        m = cv2.convertScaleAbs(image_marker32) #convert back to uint8 
-
-        #bitwise of the mask with the input image
-        ret,image_mask = cv2.threshold(m,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-        output = cv2.bitwise_and(roi,roi,mask = image_mask)
-        print(np.count_nonzero(output))
-        if np.count_nonzero(output) > 30000:
-            predict = "real_face"
-        else:
-            predict = "fake_face"
-
-        return predict
+        return labels[predict[0]]
     
     def process_weight(self, weight): 
         HIGH=1
@@ -314,7 +295,8 @@ class DetectFace(object):
         
         for (x, y, w, h) in self.faces:
             cv2.rectangle(self.resize, (x, y), (x+w, y+h), (0, 255, 0), 5)
-        
+            self.roi_color = self.resize_c[y:y+h, x+x+w]
+
     def recognize_face(self, img):
         rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         data = pickle.loads(open("encodings.pickle", "rb").read())    
