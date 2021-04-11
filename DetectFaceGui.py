@@ -145,12 +145,11 @@ class DetectFace(object):
         self.timer_1.start(1000)
         self.timer_1.timeout.connect(self.displayTime)
         
-        mobile_model = MobileLiteNet54()
-        checkpoint = torch.load('MobileLiteNet54/_40_best.pth.tar', map_location='cpu')
+        mobile_model = MobileLiteNet54_se()
+        checkpoint = torch.load('MobileLiteNet54-se/_68_best.pth.tar', map_location='cpu')
         
         self.model = nn.DataParallel(mobile_model)
         self.model.load_state_dict(checkpoint['state_dict'])
-
 
         self.DT =21
         self.SCK=20
@@ -209,7 +208,7 @@ class DetectFace(object):
         + time.toString() + "\t" + weight + " kg" + "\n")
 
     def antispoofing(self):
-        labels = ["real_face", "fake_face"]
+        labels = ["fake_face", "real_face"]
 
         roi_faces = cv2.resize(self.roi_color , (224, 224))
         roi_faces = np.reshape(roi_faces , (1, 3, 224, 224))
