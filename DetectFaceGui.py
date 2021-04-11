@@ -18,6 +18,8 @@ import RPi.GPIO as gpio
 import torch
 import torch.nn as nn
 from MobileNetLite import *
+from torchvision import transforms
+from PIL import Image
 
 class DetectFace(object):
     def setupUi(self, MainWindow):
@@ -207,15 +209,25 @@ class DetectFace(object):
         f.write(name + "\t\t" + date.toString() + "\t" 
         + time.toString() + "\t" + weight + " kg" + "\n")
 
+    def transform(self, img):
+        trn = transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.14300402, 0.1434545, 0.14277956],
+                            std=[0.10050353, 0.100842826, 0.10034215])
+        ])
+        return trn(img)
+
     def antispoofing(self):
         labels = ["fake_face", "real_face"]
 
-        roi_faces = cv2.resize(self.roi_color , (224, 224))
-        roi_faces = np.reshape(roi_faces , (1, 3, 224, 224))
-        roi_faces = torch.tensor(roi_faces)
-        roi_faces = roi_faces.float()
+        PIL_image = Image.fromarray(np.uint8(self.roi_color)).convert('RGB')
 
-        out = self.model(roi_faces)
+        img = transform(PIL_image)
+        img = img.unsqueeze(0)
+        
+        out = self.model(img)
         _, predict = torch.max(out, 1)
         predict = predict.numpy()
 
