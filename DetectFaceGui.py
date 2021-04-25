@@ -15,11 +15,8 @@ import face_recognition
 import pickle
 import numpy as np
 import RPi.GPIO as gpio
-import torch
-import torch.nn as nn
-from MobileNetLite import *
-from torchvision import transforms
-from PIL import Image
+from keras.models import load_model
+
 
 class DetectFace(object):
     def setupUi(self, MainWindow):
@@ -146,12 +143,9 @@ class DetectFace(object):
         self.timer_1 = QtCore.QTimer()
         self.timer_1.start(1000)
         self.timer_1.timeout.connect(self.displayTime)
-        
-        mobile_model = MobileLiteNet54_se()
-        checkpoint = torch.load('MobileLiteNet54-se/_68_best.pth.tar', map_location='cpu')
-        
-        self.model = nn.DataParallel(mobile_model)
-        self.model.load_state_dict(checkpoint['state_dict'])
+
+        self.le = pickle.loads(open("le.pickle", "rb").read())
+        self.model = load_model("my_model.h5")
 
         self.DT =21
         self.SCK=20
@@ -209,36 +203,25 @@ class DetectFace(object):
         f.write(name + "\t\t" + date.toString() + "\t" 
         + time.toString() + "\t" + weight + " kg" + "\n")
 
-    def transform(self, img):
-        trn = transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.14300402, 0.1434545, 0.14277956],
-                            std=[0.10050353, 0.100842826, 0.10034215])
-        ])
-        return trn(img)
-
     def antispoofing(self):
-        labels = ["fake_face", "real_face"]
+        face = cv2.resize(self.roi_color, (64, 64))
+        face = face.astype("float") / 255.0
+        face = np.expand_dims(face, axis=0)
+        preds = self.model.predict(face)[0]
+        j = np.argmax(preds)
+        label = self.le.classes_[j]
 
-        PIL_image = Image.fromarray(np.uint8(self.roi_color)).convert('RGB')
-
-        img = transform(PIL_image)
-        img = img.unsqueeze(0)
-        
-        out = self.model(img)
-        _, predict = torch.max(out, 1)
-        predict = predict.numpy()
-
-        return labels[predict[0]]
+        if preds[j] > 0.9:
+            return label
+        else:
+            return "Unknown"
     
     def process_weight(self, weight): 
         HIGH=1
         LOW=0
 
         val=0
-            
+
         def readCount():
             i=0
             Count=0
@@ -267,17 +250,13 @@ class DetectFace(object):
 
         val = readCount()
 
-        while 1:
-            count= readCount()
-            w=0
-            w=(val-count)/106
+        while True:
+            count = readCount()
+            w = 0
+            w = (val-count)/106
 
             if weight > val:
                 break
-            
-            print (w,"g")
-            
-        print("ok")
 
     def off_webcam(self):
         self.timer.stop()
@@ -318,7 +297,7 @@ class DetectFace(object):
             self.faceEnable = False
 
         boxes = [(y, x + w, y + h, x) for (x, y, w, h) in self.faces]
-        #boxes = face_recognition.face_locations(rgb, model='hog')
+      
         encodings = face_recognition.face_encodings(rgb, boxes)
 
         name = ""
@@ -343,7 +322,7 @@ class DetectFace(object):
         
         if self.faceEnable:
             predict = self.antispoofing()
-            if predict == "real_face":
+            if predict == "real":
                 if self.face_name != "Unknown" and self.face_name != "":
                     self.name .setText(self.face_name)
                     self.time.setText(self.current_time.toString())
